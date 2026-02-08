@@ -1,23 +1,22 @@
 name: readLike(需手动取消schedule注释)（自动阅读idc随机点赞）
 #只是固定了WEBSITE变量为idcflare.com
 
-# GitHub.secrets优先级最高，即使没有设置对应的变量，它也会读取，这时变量为空值，导致报错，.env读取的变量无法覆盖这个值,使用了${PASSWORD_ESCAPED//\#/\\#}来对#转义,需要两个\，但是我直接在env文件使用这种方法是不行的，GitHub action是有效
 on:
   schedule:
-     # 每天 UTC 时间 19:40 运行
-      - cron: "26 10 * * *"
-  workflow_dispatch: # 允许手动触发
+    # 每天 UTC 时间 19:40 运行
+    - cron: "26 10 * * *"
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 35 # 设置作业超时时间为20分钟
+    timeout-minutes: 35
 
     strategy:
       matrix:
         node-version: [20.x]
+
     env:
-      # 在作业级别设置环境变量      
       USERNAMES: ${{ secrets.IDCUSERNAMES }}
       PASSWORDS: ${{ secrets.IDCPASSWORDS }}
       WEBSITE: "https://idcflare.com"
@@ -29,40 +28,56 @@ jobs:
       SPECIFIC_USER: ${{ secrets.SPECIFIC_USER }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       LIKE_SPECIFIC_USER: ${{ secrets.LIKE_SPECIFIC_USER }}
-      ENABLE_RSS_FETCH: ${{ secrets.ENABLE_RSS_FETCH }}
-      ENABLE_TOPIC_DATA_FETCH: ${{ secrets.ENABLE_TOPIC_DATA_FETCH }}
+      ENABLE_RSS_FETCH: ${{ secrets.ENABLE_RSS_FETCH || '' }}
+      ENABLE_TOPIC_DATA_FETCH: ${{ secrets.ENABLE_TOPIC_DATA_FETCH || '' }}
       HEALTH_PORT: ${{ secrets.HEALTH_PORT }}
-      # 代理配置
+
       PROXY_URL: ${{ secrets.PROXY_URL }}
       PROXY_TYPE: ${{ secrets.PROXY_TYPE }}
       PROXY_HOST: ${{ secrets.PROXY_HOST }}
       PROXY_PORT: ${{ secrets.PROXY_PORT }}
       PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
       PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
-      # 数据库配置
+
       POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
       COCKROACH_URI: ${{ secrets.COCKROACH_URI }}
       NEON_URI: ${{ secrets.NEON_URI }}
       AIVEN_MYSQL_URI: ${{ secrets.AIVEN_MYSQL_URI }}
       MONGO_URI: ${{ secrets.MONGO_URI }}
+
     steps:
-      - uses: actions/checkout@v3 # 检出仓库
+      - uses: actions/checkout@v3
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
+          cache: 'npm'
 
-      - name: Cache node modules
-        uses: actions/cache@v3
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
       - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Mask secrets (prevent USERNAMES leak)
+        shell: pwsh
         run: |
-          npm install
+          function Add-Masks($value) {
+            if ([string]::IsNullOrWhiteSpace($value)) { return }
+            $items = ($value -split "[,\r\n]+" ) | Where-Object { $_ -and $_.Trim().Length -gt 0 }
+            foreach ($it in $items) {
+              Write-Output "::add-mask::$it"
+            }
+          }
+
+          Add-Masks $env:USERNAMES
+          Add-Masks $env:PASSWORDS
+          Add-Masks $env:PROXY_USERNAME
+          Add-Masks $env:PROXY_PASSWORD
+          Add-Masks $env:PROXY_URL
+          Add-Masks $env:POSTGRES_URI
+          Add-Masks $env:COCKROACH_URI
+          Add-Masks $env:NEON_URI
+          Add-Masks $env:AIVEN_MYSQL_URI
+          Add-Masks $env:MONGO_URI
 
       - name: Run a script
         run: node bypasscf.js
